@@ -1,0 +1,5 @@
+[package]
+
+name = "squint"
+version = "0.0.1"
+authors = ["Brian Anderson <banderson@mozilla.com>"]
