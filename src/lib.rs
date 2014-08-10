@@ -1,6 +1,8 @@
 pub use parser::parse;
 
 pub mod ast {
+    use lexer;
+
     #[deriving(Show)]
     pub struct SquintaxTree {
         pub agents: Vec<Agent>
@@ -21,7 +23,8 @@ pub mod ast {
 
     #[deriving(Show)]
     pub enum Instr {
-        At(Moment, String)
+        At(Moment, String),
+        Confusion(Vec<lexer::Token>)
     }
 
     #[deriving(Show)]
@@ -38,25 +41,75 @@ mod parser {
     use lexer;
     use std::io;
 
+    enum State {
+        LookingForAgent,
+        ReadingInitScript(String, Vec<ast::Instr>),
+        ReadingScript(String, ast::Script, String, Vec<ast::Instr>)
+    }
+
     pub fn parse<B: io::Buffer>(rdr: &mut B) -> ast::SquintaxTree {
+
+        let mut state = LookingForAgent;
+        let mut agents = vec!();
+
         for line in rdr.lines() {
             let line = line.ok().unwrap();
             let tokens = lexer::tokenize_line(line.as_slice());
             println!("{}", tokens);
+            let (n, agent) = next_state(state, tokens);
+            state = n;
+            if agent.is_some() { agents.push(agent.unwrap()) }
         }
 
         ast::SquintaxTree { agents: vec!() }
     }
+
+    fn next_state(state: State, tokens: Vec<lexer::Token>) -> (State, Option<ast::Agent>) {
+        match state {
+            LookingForAgent => match tokens.as_slice() {
+                [lexer::Agent, lexer::Name(ref s)] => {
+                    (ReadingInitScript(s.to_string(), vec!()), None)
+                }
+                _ => (LookingForAgent, None)
+            },
+            ReadingInitScript(name, mut instrs) => match tokens.as_slice() {
+                [lexer::Agent, lexer::Name(ref s)] => {
+                    let init_script = ast::Script {
+                        name: "init".to_string(),
+                        instrs: instrs
+                    };
+                    let agent = ast::Agent {
+                        name: name,
+                        init_script: init_script,
+                        scripts: vec!()
+                    };
+                    (ReadingInitScript(s.to_string(), vec!()), Some(agent))
+                }
+                [lexer::At, lexer::Moment(..), lexer::UnquotedString(_)] => {
+                    fail!()
+                }
+                [lexer::Script, lexer::QuotedString(ref name)] => {
+                    fail!()
+                }
+                tokens => {
+                    instrs.push(ast::Confusion(tokens.to_vec()));
+                    (ReadingInitScript(name, instrs), None)
+                }
+            },
+            _ => fail!()
+        }
+    }
 }
 
 mod lexer {
-    #[deriving(Show)]
+    #[deriving(Show, Clone)]
     pub enum Token {
         Agent,
         At,
         Confusion(String),
         Moment(u8, u8, u8, bool),
         Name(String),
+        Script,
         Silence,
         QuotedString(String),
         UnquotedString(String)
@@ -81,7 +134,10 @@ mod lexer {
             buf.push(At);
             let line = line.slice_from("at".len()).trim();
             tokenize_at_command(buf, line);
-        } else {
+        } else if line.starts_with("script") {
+            buf.push(Script);
+            read_quoted_string(buf, line)
+        }else {
             buf.push(Confusion(line.to_string()))
         }
     }
@@ -135,5 +191,8 @@ mod lexer {
         }
 
         buf.push(Name(line.to_string()))
+    }
+
+    fn read_quoted_string(buf: &mut Vec<Token>, line: &str) {
     }
 }
